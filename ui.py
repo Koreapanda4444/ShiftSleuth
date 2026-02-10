@@ -90,7 +90,7 @@ class ShiftSleuthApp(ctk.CTk):
         right.grid_columnconfigure(0, weight=1)
 
         ctk.CTkLabel(right, text="Crib Filter").grid(row=0, column=0, sticky="w", padx=12, pady=(12, 6))
-        self.crib_entry = ctk.CTkEntry(right, placeholder_text="e.g. flag, http, dreamhack")
+        self.crib_entry = ctk.CTkEntry(right, placeholder_text="e.g. flag, http")
         self.crib_entry.grid(row=1, column=0, sticky="ew", padx=12, pady=(0, 10))
 
         toggles = ctk.CTkFrame(right, fg_color="transparent")
@@ -134,7 +134,14 @@ class ShiftSleuthApp(ctk.CTk):
         mapping.grid_rowconfigure(2, weight=1)
         mapping.grid_columnconfigure(0, weight=1)
 
-        ctk.CTkLabel(mapping, text="Mapping Table").grid(row=0, column=0, sticky="w", padx=12, pady=(12, 6))
+        topbar = ctk.CTkFrame(mapping, fg_color="transparent")
+        topbar.grid(row=0, column=0, sticky="ew", padx=12, pady=(12, 6))
+        topbar.grid_columnconfigure(2, weight=1)
+
+        ctk.CTkLabel(topbar, text="Mapping Table").grid(row=0, column=0, sticky="w")
+
+        self.btn_copy_map = ctk.CTkButton(topbar, text="Copy Map", width=110)
+        self.btn_copy_map.grid(row=0, column=1, padx=(10, 0), sticky="w")
 
         self.map_mode_seg = ctk.CTkSegmentedButton(mapping, values=["decrypt map", "encrypt map"], width=220)
         self.map_mode_seg.set("decrypt map")
@@ -159,6 +166,7 @@ class ShiftSleuthApp(ctk.CTk):
         self.btn_copy.configure(command=self.copy_output)
         self.btn_clear.configure(command=self.clear_all)
         self.btn_recommend.configure(command=self.recommend_best)
+        self.btn_copy_map.configure(command=self.copy_mapping)
 
     def schedule_update(self, *_args):
         if self._debounce_job is not None:
@@ -224,10 +232,8 @@ class ShiftSleuthApp(ctk.CTk):
         canvas.get_tk_widget().pack(fill="both", expand=True)
 
     def update_chart(self):
-        input_text = self.get_input_text()
-        selected_text = self.get_selected_text()
         self.init_chart_if_needed()
-        update_frequency_axes(self._ax, input_text, selected_text)
+        update_frequency_axes(self._ax, self.get_input_text(), self.get_selected_text())
         self._canvas.draw_idle()
 
     def _clear_candidates(self):
@@ -250,6 +256,9 @@ class ShiftSleuthApp(ctk.CTk):
             items.append((shift, score, plain))
         items.sort(key=lambda x: x[1])
         return items
+
+    def _row_click_bind(self, widget, shift: int):
+        widget.bind("<Button-1>", lambda _e: self.apply_candidate(shift))
 
     def update_candidates(self):
         text = self.get_input_text()
@@ -278,10 +287,12 @@ class ShiftSleuthApp(ctk.CTk):
         shown = items[:10]
         confs = confidence_percent([s for _, s, _ in shown])
 
+        current_shift = int(round(self.shift_slider.get()))
         _, alpha_total = letter_counts_az(text)
 
         for (shift, score, plain), conf in zip(shown, confs):
-            row = ctk.CTkFrame(self.cand_frame, corner_radius=10)
+            highlight = (shift == current_shift and self.mode_seg.get() == "decrypt")
+            row = ctk.CTkFrame(self.cand_frame, corner_radius=10, fg_color=("gray85", "gray25") if highlight else None)
             row.pack(fill="x", padx=6, pady=6)
 
             info = ctk.CTkFrame(row, fg_color="transparent")
@@ -291,12 +302,19 @@ class ShiftSleuthApp(ctk.CTk):
             if alpha_total < 20:
                 head += " | Low text"
 
-            ctk.CTkLabel(info, text=head).pack(anchor="w")
-            ctk.CTkLabel(info, text=self._preview_line(plain), text_color=("gray40", "gray70")).pack(anchor="w", pady=(2, 0))
+            lbl_head = ctk.CTkLabel(info, text=head)
+            lbl_head.pack(anchor="w")
 
-            ctk.CTkButton(row, text="Apply", width=80, command=lambda s=shift: self.apply_candidate(s)).pack(
-                side="right", padx=10, pady=10
-            )
+            lbl_prev = ctk.CTkLabel(info, text=self._preview_line(plain), text_color=("gray40", "gray70"))
+            lbl_prev.pack(anchor="w", pady=(2, 0))
+
+            btn = ctk.CTkButton(row, text="Apply", width=80, command=lambda s=shift: self.apply_candidate(s))
+            btn.pack(side="right", padx=10, pady=10)
+
+            self._row_click_bind(row, shift)
+            self._row_click_bind(info, shift)
+            self._row_click_bind(lbl_head, shift)
+            self._row_click_bind(lbl_prev, shift)
 
     def apply_candidate(self, shift: int):
         self.mode_seg.set("decrypt")
@@ -343,6 +361,20 @@ class ShiftSleuthApp(ctk.CTk):
             tl = chr(97 + ((i + shift) % 26))
         return fu, tu, fl, tl
 
+    def mapping_text(self) -> str:
+        shift = int(round(self.shift_slider.get()))
+        mode = self.map_mode_seg.get()
+        lines = [f"{mode} | shift {shift}"]
+        for i in range(26):
+            fu, tu, fl, tl = self._map_pair(i, shift, mode)
+            lines.append(f"{fu}->{tu}  {fl}->{tl}")
+        return "\n".join(lines)
+
+    def copy_mapping(self):
+        t = self.mapping_text()
+        self.clipboard_clear()
+        self.clipboard_append(t)
+
     def update_mapping(self):
         shift = int(round(self.shift_slider.get()))
         map_mode = self.map_mode_seg.get()
@@ -359,11 +391,8 @@ class ShiftSleuthApp(ctk.CTk):
             row = ctk.CTkFrame(self.map_frame, corner_radius=10)
             row.pack(fill="x", padx=6, pady=4)
 
-            left = ctk.CTkLabel(row, text=f"{fu} → {tu}", width=90)
-            left.pack(side="left", padx=(10, 6), pady=10)
-
-            right = ctk.CTkLabel(row, text=f"{fl} → {tl}", text_color=("gray40", "gray70"))
-            right.pack(side="left", padx=6, pady=10)
+            ctk.CTkLabel(row, text=f"{fu} → {tu}", width=90).pack(side="left", padx=(10, 6), pady=10)
+            ctk.CTkLabel(row, text=f"{fl} → {tl}", text_color=("gray40", "gray70")).pack(side="left", padx=6, pady=10)
 
     def copy_output(self):
         out = self.output_box.get("1.0", "end-1c")
