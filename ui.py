@@ -2,7 +2,7 @@ import customtkinter as ctk
 
 from cipher import encrypt, decrypt
 from scoring import chi_square_score, confidence_percent, letter_counts_az
-from crib import parse_hints, match_hints
+from crib import parse_hints, build_matcher
 
 
 class ShiftSleuthApp(ctk.CTk):
@@ -83,7 +83,7 @@ class ShiftSleuthApp(ctk.CTk):
         right.grid_columnconfigure(0, weight=1)
 
         ctk.CTkLabel(right, text="Crib Filter").grid(row=0, column=0, sticky="w", padx=12, pady=(12, 6))
-        self.crib_entry = ctk.CTkEntry(right, placeholder_text="e.g. flag, http, dreamhack")
+        self.crib_entry = ctk.CTkEntry(right, placeholder_text="e.g. flag, http")
         self.crib_entry.grid(row=1, column=0, sticky="ew", padx=12, pady=(0, 10))
 
         toggles = ctk.CTkFrame(right, fg_color="transparent")
@@ -95,10 +95,12 @@ class ShiftSleuthApp(ctk.CTk):
 
         self.regex_switch = ctk.CTkSwitch(toggles, text="Regex")
         self.regex_switch.pack(side="left", padx=(0, 8))
-        self.regex_switch.configure(state="disabled")
 
         self.case_switch = ctk.CTkSwitch(toggles, text="Ignore case")
-        self.case_switch.pack(side="left")
+        self.case_switch.pack(side="left", padx=(0, 8))
+
+        self.boundary_switch = ctk.CTkSwitch(toggles, text="Word boundary")
+        self.boundary_switch.pack(side="left")
 
         ctk.CTkLabel(right, text="Top Candidates").grid(row=3, column=0, sticky="w", padx=12, pady=(8, 6))
         self.cand_frame = ctk.CTkScrollableFrame(right, height=220)
@@ -137,13 +139,15 @@ class ShiftSleuthApp(ctk.CTk):
 
         self.crib_entry.bind("<KeyRelease>", lambda _e: self.schedule_update())
         self.andor_seg.configure(command=lambda _v: self.schedule_update())
+        self.regex_switch.configure(command=self.schedule_update)
         self.case_switch.configure(command=self.schedule_update)
+        self.boundary_switch.configure(command=self.schedule_update)
 
         self.btn_copy.configure(command=self.copy_output)
         self.btn_clear.configure(command=self.clear_all)
         self.btn_recommend.configure(command=self.recommend_best)
 
-    def schedule_update(self):
+    def schedule_update(self, *_args):
         if self._debounce_job is not None:
             self.after_cancel(self._debounce_job)
         self._debounce_job = self.after(120, self.update_all)
@@ -193,11 +197,11 @@ class ShiftSleuthApp(ctk.CTk):
             return t[:limit] + "..."
         return t
 
-    def build_candidates(self, text: str, hints: list[str], mode: str, ignore_case: bool):
+    def build_candidates(self, text: str, matcher):
         items = []
         for shift in range(26):
             plain = decrypt(text, shift)
-            if not match_hints(plain, hints, mode, ignore_case):
+            if not matcher(plain):
                 continue
             score = chi_square_score(plain)
             items.append((shift, score, plain))
@@ -215,9 +219,15 @@ class ShiftSleuthApp(ctk.CTk):
         hints = parse_hints(self.crib_entry.get())
         mode = self.andor_seg.get()
         ignore_case = bool(self.case_switch.get())
+        use_regex = bool(self.regex_switch.get())
+        word_boundary = bool(self.boundary_switch.get())
 
-        items = self.build_candidates(text, hints, mode, ignore_case)
+        matcher, err = build_matcher(hints, mode, ignore_case, use_regex, word_boundary)
+        if err:
+            ctk.CTkLabel(self.cand_frame, text=err).pack(anchor="w", padx=10, pady=10)
+            return
 
+        items = self.build_candidates(text, matcher)
         if not items:
             ctk.CTkLabel(self.cand_frame, text="No candidates").pack(anchor="w", padx=10, pady=10)
             return
@@ -259,8 +269,14 @@ class ShiftSleuthApp(ctk.CTk):
         hints = parse_hints(self.crib_entry.get())
         mode = self.andor_seg.get()
         ignore_case = bool(self.case_switch.get())
+        use_regex = bool(self.regex_switch.get())
+        word_boundary = bool(self.boundary_switch.get())
 
-        items = self.build_candidates(text, hints, mode, ignore_case)
+        matcher, err = build_matcher(hints, mode, ignore_case, use_regex, word_boundary)
+        if err:
+            return
+
+        items = self.build_candidates(text, matcher)
         if not items:
             return
 
