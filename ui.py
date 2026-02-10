@@ -25,7 +25,7 @@ class ShiftSleuthApp(ctk.CTk):
         self._build_bottom()
 
         self._wire_events()
-        self.update_output()
+        self.update_all()
 
     def _build_topbar(self):
         top = ctk.CTkFrame(self, corner_radius=12)
@@ -103,12 +103,6 @@ class ShiftSleuthApp(ctk.CTk):
         self.cand_frame = ctk.CTkScrollableFrame(right, height=220)
         self.cand_frame.grid(row=4, column=0, sticky="nsew", padx=12, pady=(0, 12))
 
-        for _ in range(5):
-            row = ctk.CTkFrame(self.cand_frame, corner_radius=10)
-            row.pack(fill="x", padx=6, pady=6)
-            ctk.CTkLabel(row, text="Shift ? | Confidence ?% | Score ?").pack(anchor="w", padx=10, pady=(8, 2))
-            ctk.CTkLabel(row, text="(candidate preview)").pack(anchor="w", padx=10, pady=(0, 8))
-
     def _build_bottom(self):
         bottom = ctk.CTkFrame(self, corner_radius=12)
         bottom.grid(row=2, column=0, sticky="nsew", padx=12, pady=(0, 12))
@@ -122,11 +116,7 @@ class ShiftSleuthApp(ctk.CTk):
         chart.grid_columnconfigure(0, weight=1)
 
         ctk.CTkLabel(chart, text="Frequency Chart").grid(row=0, column=0, sticky="w", padx=12, pady=(12, 6))
-        self.chart_placeholder = ctk.CTkLabel(
-            chart,
-            text="(chart area)",
-            text_color=("gray40", "gray70"),
-        )
+        self.chart_placeholder = ctk.CTkLabel(chart, text="(chart area)", text_color=("gray40", "gray70"))
         self.chart_placeholder.grid(row=1, column=0, sticky="nsew", padx=12, pady=(0, 12))
 
         mapping = ctk.CTkFrame(bottom, corner_radius=12)
@@ -140,11 +130,7 @@ class ShiftSleuthApp(ctk.CTk):
         self.map_mode_seg.set("decrypt map")
         self.map_mode_seg.grid(row=1, column=0, sticky="w", padx=12, pady=(0, 10))
 
-        self.map_placeholder = ctk.CTkLabel(
-            mapping,
-            text="(mapping area)",
-            text_color=("gray40", "gray70"),
-        )
+        self.map_placeholder = ctk.CTkLabel(mapping, text="(mapping area)", text_color=("gray40", "gray70"))
         self.map_placeholder.grid(row=2, column=0, sticky="nsew", padx=12, pady=(0, 12))
 
     def _wire_events(self):
@@ -154,12 +140,12 @@ class ShiftSleuthApp(ctk.CTk):
 
         self.btn_copy.configure(command=self.copy_output)
         self.btn_clear.configure(command=self.clear_all)
-        self.btn_recommend.configure(command=self.not_ready_recommend)
+        self.btn_recommend.configure(command=self.recommend_placeholder)
 
     def schedule_update(self):
         if self._debounce_job is not None:
             self.after_cancel(self._debounce_job)
-        self._debounce_job = self.after(120, self.update_output)
+        self._debounce_job = self.after(120, self.update_all)
 
     def on_shift_change(self):
         shift = int(round(self.shift_slider.get()))
@@ -175,9 +161,12 @@ class ShiftSleuthApp(ctk.CTk):
         self.output_box.insert("1.0", text)
         self.output_box.configure(state="disabled")
 
-    def update_output(self):
+    def update_all(self):
         self._debounce_job = None
+        self.update_output()
+        self.update_candidates()
 
+    def update_output(self):
         text = self.get_input_text()
         if not text.strip():
             self.set_output_text("")
@@ -193,6 +182,51 @@ class ShiftSleuthApp(ctk.CTk):
 
         self.set_output_text(out)
 
+    def _clear_candidates(self):
+        for w in self.cand_frame.winfo_children():
+            w.destroy()
+
+    def _preview_line(self, s: str, limit: int = 140) -> str:
+        t = s.replace("\n", " ").strip()
+        if len(t) > limit:
+            return t[:limit] + "..."
+        return t
+
+    def update_candidates(self):
+        text = self.get_input_text()
+        if not text.strip():
+            self._clear_candidates()
+            return
+
+        self._clear_candidates()
+
+        for shift in range(26):
+            try:
+                plain = decrypt(text, shift)
+            except Exception:
+                plain = ""
+
+            row = ctk.CTkFrame(self.cand_frame, corner_radius=10)
+            row.pack(fill="x", padx=6, pady=6)
+
+            info = ctk.CTkFrame(row, fg_color="transparent")
+            info.pack(side="left", fill="x", expand=True, padx=10, pady=10)
+
+            title = ctk.CTkLabel(info, text=f"Shift {shift}")
+            title.pack(anchor="w")
+
+            preview = ctk.CTkLabel(info, text=self._preview_line(plain), text_color=("gray40", "gray70"))
+            preview.pack(anchor="w", pady=(2, 0))
+
+            btn = ctk.CTkButton(row, text="Apply", width=80, command=lambda s=shift: self.apply_candidate(s))
+            btn.pack(side="right", padx=10, pady=10)
+
+    def apply_candidate(self, shift: int):
+        self.mode_seg.set("decrypt")
+        self.shift_slider.set(shift)
+        self.shift_value.configure(text=str(shift))
+        self.update_all()
+
     def copy_output(self):
         out = self.output_box.get("1.0", "end-1c")
         if not out.strip():
@@ -203,9 +237,10 @@ class ShiftSleuthApp(ctk.CTk):
     def clear_all(self):
         self.input_box.delete("1.0", "end")
         self.set_output_text("")
+        self._clear_candidates()
 
-    def not_ready_recommend(self):
-        messagebox.showinfo("Recommend", "자동 추천 기능은 다음 단계에서 추가할게요.")
+    def recommend_placeholder(self):
+        messagebox.showinfo("Recommend", "준비 중")
 
 
 def main():
