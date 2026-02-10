@@ -1,4 +1,7 @@
 import customtkinter as ctk
+from tkinter import messagebox
+
+from cipher import encrypt, decrypt
 
 
 class ShiftSleuthApp(ctk.CTk):
@@ -11,6 +14,8 @@ class ShiftSleuthApp(ctk.CTk):
         ctk.set_appearance_mode("dark")
         ctk.set_default_color_theme("blue")
 
+        self._debounce_job = None
+
         self.grid_rowconfigure(1, weight=3)
         self.grid_rowconfigure(2, weight=2)
         self.grid_columnconfigure(0, weight=1)
@@ -18,6 +23,9 @@ class ShiftSleuthApp(ctk.CTk):
         self._build_topbar()
         self._build_main()
         self._build_bottom()
+
+        self._wire_events()
+        self.update_output()
 
     def _build_topbar(self):
         top = ctk.CTkFrame(self, corner_radius=12)
@@ -59,26 +67,23 @@ class ShiftSleuthApp(ctk.CTk):
         left.grid_rowconfigure(3, weight=1)
         left.grid_columnconfigure(0, weight=1)
 
-        ctk.CTkLabel(left, text="Input (ciphertext / plaintext)").grid(
-            row=0, column=0, sticky="w", padx=12, pady=(12, 6)
-        )
+        ctk.CTkLabel(left, text="Input").grid(row=0, column=0, sticky="w", padx=12, pady=(12, 6))
         self.input_box = ctk.CTkTextbox(left, wrap="word")
         self.input_box.grid(row=1, column=0, sticky="nsew", padx=12, pady=(0, 10))
 
-        ctk.CTkLabel(left, text="Output (result)").grid(
-            row=2, column=0, sticky="w", padx=12, pady=(4, 6)
-        )
+        ctk.CTkLabel(left, text="Output").grid(row=2, column=0, sticky="w", padx=12, pady=(4, 6))
         self.output_box = ctk.CTkTextbox(left, wrap="word")
         self.output_box.grid(row=3, column=0, sticky="nsew", padx=12, pady=(0, 12))
+        self.output_box.configure(state="disabled")
 
         right = ctk.CTkFrame(main, corner_radius=12)
         right.grid(row=0, column=1, sticky="nsew", padx=(6, 10), pady=10)
         right.grid_rowconfigure(4, weight=1)
         right.grid_columnconfigure(0, weight=1)
 
-        ctk.CTkLabel(right, text="Crib Filter (hint)").grid(row=0, column=0, sticky="w", padx=12, pady=(12, 6))
+        ctk.CTkLabel(right, text="Crib Filter").grid(row=0, column=0, sticky="w", padx=12, pady=(12, 6))
 
-        self.crib_entry = ctk.CTkEntry(right, placeholder_text="e.g. flag, http, dreamhack (later: AND/OR, Regex)")
+        self.crib_entry = ctk.CTkEntry(right, placeholder_text="e.g. flag, http, dreamhack")
         self.crib_entry.grid(row=1, column=0, sticky="ew", padx=12, pady=(0, 10))
 
         toggles = ctk.CTkFrame(right, fg_color="transparent")
@@ -102,7 +107,7 @@ class ShiftSleuthApp(ctk.CTk):
             row = ctk.CTkFrame(self.cand_frame, corner_radius=10)
             row.pack(fill="x", padx=6, pady=6)
             ctk.CTkLabel(row, text="Shift ? | Confidence ?% | Score ?").pack(anchor="w", padx=10, pady=(8, 2))
-            ctk.CTkLabel(row, text="(candidate preview appears here)").pack(anchor="w", padx=10, pady=(0, 8))
+            ctk.CTkLabel(row, text="(candidate preview)").pack(anchor="w", padx=10, pady=(0, 8))
 
     def _build_bottom(self):
         bottom = ctk.CTkFrame(self, corner_radius=12)
@@ -116,13 +121,11 @@ class ShiftSleuthApp(ctk.CTk):
         chart.grid_rowconfigure(1, weight=1)
         chart.grid_columnconfigure(0, weight=1)
 
-        ctk.CTkLabel(chart, text="Frequency Chart (Input vs Selected vs English)").grid(
-            row=0, column=0, sticky="w", padx=12, pady=(12, 6)
-        )
+        ctk.CTkLabel(chart, text="Frequency Chart").grid(row=0, column=0, sticky="w", padx=12, pady=(12, 6))
         self.chart_placeholder = ctk.CTkLabel(
             chart,
-            text="(Commit 10: matplotlib canvas will be embedded here)",
-            text_color=("gray40", "gray70")
+            text="(chart area)",
+            text_color=("gray40", "gray70"),
         )
         self.chart_placeholder.grid(row=1, column=0, sticky="nsew", padx=12, pady=(0, 12))
 
@@ -131,7 +134,7 @@ class ShiftSleuthApp(ctk.CTk):
         mapping.grid_rowconfigure(2, weight=1)
         mapping.grid_columnconfigure(0, weight=1)
 
-        ctk.CTkLabel(mapping, text="Mapping Table (A→D …)").grid(row=0, column=0, sticky="w", padx=12, pady=(12, 6))
+        ctk.CTkLabel(mapping, text="Mapping Table").grid(row=0, column=0, sticky="w", padx=12, pady=(12, 6))
 
         self.map_mode_seg = ctk.CTkSegmentedButton(mapping, values=["decrypt map", "encrypt map"], width=220)
         self.map_mode_seg.set("decrypt map")
@@ -139,10 +142,70 @@ class ShiftSleuthApp(ctk.CTk):
 
         self.map_placeholder = ctk.CTkLabel(
             mapping,
-            text="(Commit 11: scrollable mapping table goes here)",
-            text_color=("gray40", "gray70")
+            text="(mapping area)",
+            text_color=("gray40", "gray70"),
         )
         self.map_placeholder.grid(row=2, column=0, sticky="nsew", padx=12, pady=(0, 12))
+
+    def _wire_events(self):
+        self.input_box.bind("<KeyRelease>", lambda _e: self.schedule_update())
+        self.mode_seg.configure(command=lambda _v: self.schedule_update())
+        self.shift_slider.configure(command=lambda _v: self.on_shift_change())
+
+        self.btn_copy.configure(command=self.copy_output)
+        self.btn_clear.configure(command=self.clear_all)
+        self.btn_recommend.configure(command=self.not_ready_recommend)
+
+    def schedule_update(self):
+        if self._debounce_job is not None:
+            self.after_cancel(self._debounce_job)
+        self._debounce_job = self.after(120, self.update_output)
+
+    def on_shift_change(self):
+        shift = int(round(self.shift_slider.get()))
+        self.shift_value.configure(text=str(shift))
+        self.schedule_update()
+
+    def get_input_text(self) -> str:
+        return self.input_box.get("1.0", "end-1c")
+
+    def set_output_text(self, text: str):
+        self.output_box.configure(state="normal")
+        self.output_box.delete("1.0", "end")
+        self.output_box.insert("1.0", text)
+        self.output_box.configure(state="disabled")
+
+    def update_output(self):
+        self._debounce_job = None
+
+        text = self.get_input_text()
+        if not text.strip():
+            self.set_output_text("")
+            return
+
+        shift = int(round(self.shift_slider.get()))
+        mode = self.mode_seg.get()
+
+        try:
+            out = decrypt(text, shift) if mode == "decrypt" else encrypt(text, shift)
+        except Exception as e:
+            out = f"[Error] {e}"
+
+        self.set_output_text(out)
+
+    def copy_output(self):
+        out = self.output_box.get("1.0", "end-1c")
+        if not out.strip():
+            return
+        self.clipboard_clear()
+        self.clipboard_append(out)
+
+    def clear_all(self):
+        self.input_box.delete("1.0", "end")
+        self.set_output_text("")
+
+    def not_ready_recommend(self):
+        messagebox.showinfo("Recommend", "자동 추천 기능은 다음 단계에서 추가할게요.")
 
 
 def main():

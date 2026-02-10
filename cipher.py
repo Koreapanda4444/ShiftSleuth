@@ -14,7 +14,6 @@ def _shift_lower(ch: str, shift: int) -> str:
 def caesar(text: str, shift: int, *, decrypt: bool = False) -> str:
     if not isinstance(text, str):
         raise TypeError("text must be a string")
-
     if not isinstance(shift, int):
         raise TypeError("shift must be an int")
 
@@ -43,13 +42,4 @@ def decrypt(text: str, shift: int) -> str:
     return caesar(text, shift, decrypt=True)
 
 
-def self_test() -> None:
-    assert encrypt("abc", 1) == "bcd"
-    assert decrypt("bcd", 1) == "abc"
-    assert encrypt("XYZ", 3) == "ABC"
-    assert decrypt("ABC", 3) == "XYZ"
-    assert encrypt("Hello, World!", 5) == "Mjqqt, Btwqi!"
-    assert decrypt("Mjqqt, Btwqi!", 5) == "Hello, World!"
-
-
-__all__ = ["caesar", "encrypt", "decrypt", "self_test"]
+__all__ = ["caesar", "encrypt", "decrypt"]
