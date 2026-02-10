@@ -2,6 +2,7 @@ import customtkinter as ctk
 
 from cipher import encrypt, decrypt
 from scoring import chi_square_score, confidence_percent, letter_counts_az
+from crib import parse_hints, match_hints
 
 
 class ShiftSleuthApp(ctk.CTk):
@@ -87,12 +88,14 @@ class ShiftSleuthApp(ctk.CTk):
 
         toggles = ctk.CTkFrame(right, fg_color="transparent")
         toggles.grid(row=2, column=0, sticky="ew", padx=12, pady=(0, 8))
+
         self.andor_seg = ctk.CTkSegmentedButton(toggles, values=["AND", "OR"], width=140)
         self.andor_seg.set("AND")
         self.andor_seg.pack(side="left", padx=(0, 8))
 
         self.regex_switch = ctk.CTkSwitch(toggles, text="Regex")
         self.regex_switch.pack(side="left", padx=(0, 8))
+        self.regex_switch.configure(state="disabled")
 
         self.case_switch = ctk.CTkSwitch(toggles, text="Ignore case")
         self.case_switch.pack(side="left")
@@ -131,7 +134,10 @@ class ShiftSleuthApp(ctk.CTk):
         self.input_box.bind("<KeyRelease>", lambda _e: self.schedule_update())
         self.mode_seg.configure(command=lambda _v: self.schedule_update())
         self.shift_slider.configure(command=lambda _v: self.on_shift_change())
+
         self.crib_entry.bind("<KeyRelease>", lambda _e: self.schedule_update())
+        self.andor_seg.configure(command=lambda _v: self.schedule_update())
+        self.case_switch.configure(command=self.schedule_update)
 
         self.btn_copy.configure(command=self.copy_output)
         self.btn_clear.configure(command=self.clear_all)
@@ -187,10 +193,12 @@ class ShiftSleuthApp(ctk.CTk):
             return t[:limit] + "..."
         return t
 
-    def build_candidates(self, text: str):
+    def build_candidates(self, text: str, hints: list[str], mode: str, ignore_case: bool):
         items = []
         for shift in range(26):
             plain = decrypt(text, shift)
+            if not match_hints(plain, hints, mode, ignore_case):
+                continue
             score = chi_square_score(plain)
             items.append((shift, score, plain))
         items.sort(key=lambda x: x[1])
@@ -204,11 +212,20 @@ class ShiftSleuthApp(ctk.CTk):
 
         self._clear_candidates()
 
-        _, alpha_total = letter_counts_az(text)
+        hints = parse_hints(self.crib_entry.get())
+        mode = self.andor_seg.get()
+        ignore_case = bool(self.case_switch.get())
 
-        items = self.build_candidates(text)
+        items = self.build_candidates(text, hints, mode, ignore_case)
+
+        if not items:
+            ctk.CTkLabel(self.cand_frame, text="No candidates").pack(anchor="w", padx=10, pady=10)
+            return
+
         shown = items[:10]
         confs = confidence_percent([s for _, s, _ in shown])
+
+        _, alpha_total = letter_counts_az(text)
 
         for (shift, score, plain), conf in zip(shown, confs):
             row = ctk.CTkFrame(self.cand_frame, corner_radius=10)
@@ -238,7 +255,16 @@ class ShiftSleuthApp(ctk.CTk):
         text = self.get_input_text()
         if not text.strip():
             return
-        best_shift, _, _ = self.build_candidates(text)[0]
+
+        hints = parse_hints(self.crib_entry.get())
+        mode = self.andor_seg.get()
+        ignore_case = bool(self.case_switch.get())
+
+        items = self.build_candidates(text, hints, mode, ignore_case)
+        if not items:
+            return
+
+        best_shift, _, _ = items[0]
         self.apply_candidate(best_shift)
 
     def copy_output(self):
