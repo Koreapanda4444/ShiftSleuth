@@ -27,8 +27,7 @@ def letter_freq_az(text: str) -> tuple[list[float], int]:
     counts, total = letter_counts_az(text)
     if total == 0:
         return [0.0] * 26, 0
-    freqs = [c / total for c in counts]
-    return freqs, total
+    return [c / total for c in counts], total
 
 
 def alpha_ratio(text: str) -> float:
@@ -36,3 +35,17 @@ def alpha_ratio(text: str) -> float:
         return 0.0
     _, total = letter_counts_az(text)
     return total / len(text)
+
+
+def chi_square_score(text: str) -> float:
+    counts, total = letter_counts_az(text)
+    if total == 0:
+        return float("inf")
+
+    score = 0.0
+    for i in range(26):
+        exp = ENGLISH_FREQ[i] * total
+        if exp > 0:
+            diff = counts[i] - exp
+            score += (diff * diff) / exp
+    return score
