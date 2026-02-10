@@ -126,7 +126,6 @@ class ShiftSleuthApp(ctk.CTk):
         chart.grid_columnconfigure(0, weight=1)
 
         ctk.CTkLabel(chart, text="Frequency Chart").grid(row=0, column=0, sticky="w", padx=12, pady=(12, 6))
-
         self.chart_host = ctk.CTkFrame(chart, corner_radius=10)
         self.chart_host.grid(row=1, column=0, sticky="nsew", padx=12, pady=(0, 12))
 
@@ -136,11 +135,13 @@ class ShiftSleuthApp(ctk.CTk):
         mapping.grid_columnconfigure(0, weight=1)
 
         ctk.CTkLabel(mapping, text="Mapping Table").grid(row=0, column=0, sticky="w", padx=12, pady=(12, 6))
+
         self.map_mode_seg = ctk.CTkSegmentedButton(mapping, values=["decrypt map", "encrypt map"], width=220)
         self.map_mode_seg.set("decrypt map")
         self.map_mode_seg.grid(row=1, column=0, sticky="w", padx=12, pady=(0, 10))
-        self.map_placeholder = ctk.CTkLabel(mapping, text="(mapping area)", text_color=("gray40", "gray70"))
-        self.map_placeholder.grid(row=2, column=0, sticky="nsew", padx=12, pady=(0, 12))
+
+        self.map_frame = ctk.CTkScrollableFrame(mapping, corner_radius=10)
+        self.map_frame.grid(row=2, column=0, sticky="nsew", padx=12, pady=(0, 12))
 
     def _wire_events(self):
         self.input_box.bind("<KeyRelease>", lambda _e: self.schedule_update())
@@ -152,6 +153,8 @@ class ShiftSleuthApp(ctk.CTk):
         self.regex_switch.configure(command=self.schedule_update)
         self.case_switch.configure(command=self.schedule_update)
         self.boundary_switch.configure(command=self.schedule_update)
+
+        self.map_mode_seg.configure(command=lambda _v: self.schedule_update())
 
         self.btn_copy.configure(command=self.copy_output)
         self.btn_clear.configure(command=self.clear_all)
@@ -181,6 +184,7 @@ class ShiftSleuthApp(ctk.CTk):
         self.update_output()
         self.update_candidates()
         self.update_chart()
+        self.update_mapping()
 
     def update_output(self):
         text = self.get_input_text()
@@ -217,13 +221,11 @@ class ShiftSleuthApp(ctk.CTk):
         self._ax = ax
         canvas = FigureCanvasTkAgg(fig, master=self.chart_host)
         self._canvas = canvas
-        widget = canvas.get_tk_widget()
-        widget.pack(fill="both", expand=True)
+        canvas.get_tk_widget().pack(fill="both", expand=True)
 
     def update_chart(self):
         input_text = self.get_input_text()
         selected_text = self.get_selected_text()
-
         self.init_chart_if_needed()
         update_frequency_axes(self._ax, input_text, selected_text)
         self._canvas.draw_idle()
@@ -324,6 +326,45 @@ class ShiftSleuthApp(ctk.CTk):
         best_shift, _, _ = items[0]
         self.apply_candidate(best_shift)
 
+    def _clear_mapping(self):
+        for w in self.map_frame.winfo_children():
+            w.destroy()
+
+    def _map_pair(self, i: int, shift: int, map_mode: str):
+        if map_mode == "decrypt map":
+            fu = chr(65 + i)
+            tu = chr(65 + ((i - shift) % 26))
+            fl = chr(97 + i)
+            tl = chr(97 + ((i - shift) % 26))
+        else:
+            fu = chr(65 + i)
+            tu = chr(65 + ((i + shift) % 26))
+            fl = chr(97 + i)
+            tl = chr(97 + ((i + shift) % 26))
+        return fu, tu, fl, tl
+
+    def update_mapping(self):
+        shift = int(round(self.shift_slider.get()))
+        map_mode = self.map_mode_seg.get()
+
+        self._clear_mapping()
+
+        header = ctk.CTkFrame(self.map_frame, corner_radius=10)
+        header.pack(fill="x", padx=6, pady=(6, 8))
+        ctk.CTkLabel(header, text=f"{map_mode} | shift {shift}").pack(anchor="w", padx=10, pady=10)
+
+        for i in range(26):
+            fu, tu, fl, tl = self._map_pair(i, shift, map_mode)
+
+            row = ctk.CTkFrame(self.map_frame, corner_radius=10)
+            row.pack(fill="x", padx=6, pady=4)
+
+            left = ctk.CTkLabel(row, text=f"{fu} → {tu}", width=90)
+            left.pack(side="left", padx=(10, 6), pady=10)
+
+            right = ctk.CTkLabel(row, text=f"{fl} → {tl}", text_color=("gray40", "gray70"))
+            right.pack(side="left", padx=6, pady=10)
+
     def copy_output(self):
         out = self.output_box.get("1.0", "end-1c")
         if not out.strip():
@@ -336,6 +377,7 @@ class ShiftSleuthApp(ctk.CTk):
         self.set_output_text("")
         self._clear_candidates()
         self.update_chart()
+        self.update_mapping()
 
 
 def main():
