@@ -1,8 +1,11 @@
 import customtkinter as ctk
 
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+
 from cipher import encrypt, decrypt
 from scoring import chi_square_score, confidence_percent, letter_counts_az
 from crib import parse_hints, build_matcher
+from viz import build_frequency_figure, update_frequency_axes
 
 
 class ShiftSleuthApp(ctk.CTk):
@@ -16,6 +19,10 @@ class ShiftSleuthApp(ctk.CTk):
         ctk.set_default_color_theme("blue")
 
         self._debounce_job = None
+
+        self._fig = None
+        self._ax = None
+        self._canvas = None
 
         self.grid_rowconfigure(1, weight=3)
         self.grid_rowconfigure(2, weight=2)
@@ -83,7 +90,7 @@ class ShiftSleuthApp(ctk.CTk):
         right.grid_columnconfigure(0, weight=1)
 
         ctk.CTkLabel(right, text="Crib Filter").grid(row=0, column=0, sticky="w", padx=12, pady=(12, 6))
-        self.crib_entry = ctk.CTkEntry(right, placeholder_text="e.g. flag, http")
+        self.crib_entry = ctk.CTkEntry(right, placeholder_text="e.g. flag, http, dreamhack")
         self.crib_entry.grid(row=1, column=0, sticky="ew", padx=12, pady=(0, 10))
 
         toggles = ctk.CTkFrame(right, fg_color="transparent")
@@ -117,14 +124,17 @@ class ShiftSleuthApp(ctk.CTk):
         chart.grid(row=0, column=0, sticky="nsew", padx=(10, 6), pady=10)
         chart.grid_rowconfigure(1, weight=1)
         chart.grid_columnconfigure(0, weight=1)
+
         ctk.CTkLabel(chart, text="Frequency Chart").grid(row=0, column=0, sticky="w", padx=12, pady=(12, 6))
-        self.chart_placeholder = ctk.CTkLabel(chart, text="(chart area)", text_color=("gray40", "gray70"))
-        self.chart_placeholder.grid(row=1, column=0, sticky="nsew", padx=12, pady=(0, 12))
+
+        self.chart_host = ctk.CTkFrame(chart, corner_radius=10)
+        self.chart_host.grid(row=1, column=0, sticky="nsew", padx=12, pady=(0, 12))
 
         mapping = ctk.CTkFrame(bottom, corner_radius=12)
         mapping.grid(row=0, column=1, sticky="nsew", padx=(6, 10), pady=10)
         mapping.grid_rowconfigure(2, weight=1)
         mapping.grid_columnconfigure(0, weight=1)
+
         ctk.CTkLabel(mapping, text="Mapping Table").grid(row=0, column=0, sticky="w", padx=12, pady=(12, 6))
         self.map_mode_seg = ctk.CTkSegmentedButton(mapping, values=["decrypt map", "encrypt map"], width=220)
         self.map_mode_seg.set("decrypt map")
@@ -170,6 +180,7 @@ class ShiftSleuthApp(ctk.CTk):
         self._debounce_job = None
         self.update_output()
         self.update_candidates()
+        self.update_chart()
 
     def update_output(self):
         text = self.get_input_text()
@@ -186,6 +197,36 @@ class ShiftSleuthApp(ctk.CTk):
             out = f"[Error] {e}"
 
         self.set_output_text(out)
+
+    def get_selected_text(self) -> str:
+        text = self.get_input_text()
+        if not text.strip():
+            return ""
+        shift = int(round(self.shift_slider.get()))
+        mode = self.mode_seg.get()
+        try:
+            return decrypt(text, shift) if mode == "decrypt" else encrypt(text, shift)
+        except Exception:
+            return ""
+
+    def init_chart_if_needed(self):
+        if self._canvas is not None:
+            return
+        fig, ax = build_frequency_figure("", "")
+        self._fig = fig
+        self._ax = ax
+        canvas = FigureCanvasTkAgg(fig, master=self.chart_host)
+        self._canvas = canvas
+        widget = canvas.get_tk_widget()
+        widget.pack(fill="both", expand=True)
+
+    def update_chart(self):
+        input_text = self.get_input_text()
+        selected_text = self.get_selected_text()
+
+        self.init_chart_if_needed()
+        update_frequency_axes(self._ax, input_text, selected_text)
+        self._canvas.draw_idle()
 
     def _clear_candidates(self):
         for w in self.cand_frame.winfo_children():
@@ -294,6 +335,7 @@ class ShiftSleuthApp(ctk.CTk):
         self.input_box.delete("1.0", "end")
         self.set_output_text("")
         self._clear_candidates()
+        self.update_chart()
 
 
 def main():
