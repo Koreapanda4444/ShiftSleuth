@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import math
+
 
 ENGLISH_FREQ = [
     0.08167, 0.01492, 0.02782, 0.04253, 0.12702, 0.02228, 0.02015, 0.06094,
@@ -23,20 +25,6 @@ def letter_counts_az(text: str) -> tuple[list[int], int]:
     return counts, total
 
 
-def letter_freq_az(text: str) -> tuple[list[float], int]:
-    counts, total = letter_counts_az(text)
-    if total == 0:
-        return [0.0] * 26, 0
-    return [c / total for c in counts], total
-
-
-def alpha_ratio(text: str) -> float:
-    if not text:
-        return 0.0
-    _, total = letter_counts_az(text)
-    return total / len(text)
-
-
 def chi_square_score(text: str) -> float:
     counts, total = letter_counts_az(text)
     if total == 0:
@@ -49,3 +37,36 @@ def chi_square_score(text: str) -> float:
             diff = counts[i] - exp
             score += (diff * diff) / exp
     return score
+
+
+def confidence_percent(scores: list[float]) -> list[float]:
+    finite = [s for s in scores if math.isfinite(s)]
+    if not finite:
+        return [0.0 for _ in scores]
+
+    m = min(finite)
+    adj = []
+    for s in scores:
+        if math.isfinite(s):
+            adj.append(s - m)
+        else:
+            adj.append(float("inf"))
+
+    finite_adj = [a for a in adj if math.isfinite(a)]
+    mx = max(finite_adj) if finite_adj else 1.0
+    if mx <= 0:
+        return [100.0 if a == 0 else 0.0 for a in adj]
+
+    k = 5.0
+    weights = []
+    for a in adj:
+        if math.isfinite(a):
+            weights.append(math.exp(-k * (a / mx)))
+        else:
+            weights.append(0.0)
+
+    s = sum(weights)
+    if s <= 0:
+        return [0.0 for _ in scores]
+
+    return [w / s * 100.0 for w in weights]

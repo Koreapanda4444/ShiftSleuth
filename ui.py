@@ -1,7 +1,7 @@
 import customtkinter as ctk
 
 from cipher import encrypt, decrypt
-from scoring import chi_square_score
+from scoring import chi_square_score, confidence_percent, letter_counts_az
 
 
 class ShiftSleuthApp(ctk.CTk):
@@ -131,6 +131,7 @@ class ShiftSleuthApp(ctk.CTk):
         self.input_box.bind("<KeyRelease>", lambda _e: self.schedule_update())
         self.mode_seg.configure(command=lambda _v: self.schedule_update())
         self.shift_slider.configure(command=lambda _v: self.on_shift_change())
+        self.crib_entry.bind("<KeyRelease>", lambda _e: self.schedule_update())
 
         self.btn_copy.configure(command=self.copy_output)
         self.btn_clear.configure(command=self.clear_all)
@@ -203,17 +204,24 @@ class ShiftSleuthApp(ctk.CTk):
 
         self._clear_candidates()
 
+        _, alpha_total = letter_counts_az(text)
+
         items = self.build_candidates(text)
         shown = items[:10]
+        confs = confidence_percent([s for _, s, _ in shown])
 
-        for shift, score, plain in shown:
+        for (shift, score, plain), conf in zip(shown, confs):
             row = ctk.CTkFrame(self.cand_frame, corner_radius=10)
             row.pack(fill="x", padx=6, pady=6)
 
             info = ctk.CTkFrame(row, fg_color="transparent")
             info.pack(side="left", fill="x", expand=True, padx=10, pady=10)
 
-            ctk.CTkLabel(info, text=f"Shift {shift} | Score {score:.2f}").pack(anchor="w")
+            head = f"Shift {shift} | Conf {conf:.0f}% | Score {score:.2f}"
+            if alpha_total < 20:
+                head += " | Low text"
+
+            ctk.CTkLabel(info, text=head).pack(anchor="w")
             ctk.CTkLabel(info, text=self._preview_line(plain), text_color=("gray40", "gray70")).pack(anchor="w", pady=(2, 0))
 
             ctk.CTkButton(row, text="Apply", width=80, command=lambda s=shift: self.apply_candidate(s)).pack(
